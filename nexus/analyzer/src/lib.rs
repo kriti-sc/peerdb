@@ -19,6 +19,7 @@ use qrep::process_options;
 use sqlparser::ast::{
     self,
     CreateMirror::{CDC, Select},
+    CreateMigration,
     DollarQuotedString, Expr, FetchDirection, SqlOption, Statement, Value, visit_relations,
     visit_statements,
 };
@@ -175,6 +176,28 @@ impl StatementAnalyzer for PeerDDLAnalyzer {
                     peer: Box::new(peer),
                     if_not_exists: *if_not_exists,
                 }))
+            }
+            Statement::CreateMigration {
+                if_not_exists,
+                migration_name,
+                from_peer,
+                to_peer,
+            } => {
+                anyhow::bail!(
+                    "------ CREATE MIGRATION is not yet supported in PeerDB analyzer: migration_name={}, from_peer={}, to_peer={}",
+                    migration_name,
+                    from_peer,
+                    to_peer
+                );
+            }
+            Statement::DropMigration {
+                if_exists,
+                migration_name,
+            } => {
+                anyhow::bail!(
+                    "------ DROP MIGRATION is not yet supported in PeerDB analyzer: migration_name={}",
+                    migration_name
+                );
             }
             Statement::CreateMirror {
                 if_not_exists,
