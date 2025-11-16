@@ -53,6 +53,18 @@ impl FlowGrpcClient {
         Ok(workflow_id)
     }
 
+    pub async fn start_migration_flow(
+        &mut self,
+        migration_config: &pt::peerdb_flow::MigrationConfig,
+    ) -> anyhow::Result<String> {
+        let create_migration_flow_req = pt::peerdb_route::CreateMigrationFlowRequest {
+            migration_config: Some(migration_config.clone()),
+        };
+        let response = self.client.create_migration_flow(create_migration_flow_req).await?;
+        let workflow_id = response.into_inner().workflow_id;
+        Ok(workflow_id)
+    }
+
     async fn start_peer_flow(
         &mut self,
         peer_flow_config: pt::peerdb_flow::FlowConnectionConfigs,
@@ -253,6 +265,23 @@ impl FlowGrpcClient {
             ));
         }
         self.start_query_replication_flow(&cfg).await
+    }
+
+
+    pub async fn start_migration_flow_job(
+        &mut self,
+        migration_name: &String,
+        from_peer: &String,
+        to_peer: &String,
+    ) -> anyhow::Result<String> {
+        let cfg = pt::peerdb_flow::MigrationConfig {
+            source_peer: from_peer.clone(),
+            target_peer: to_peer.clone(),
+            flow_job_name: migration_name.clone(),
+            ..Default::default()
+        };
+
+        self.start_migration_flow(&cfg).await
     }
 
     pub async fn is_healthy(&mut self) -> bool {

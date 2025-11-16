@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::env;
+use std::{env, string};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -421,6 +421,43 @@ impl Catalog {
                     &job.query_string,
                     &serde_json::to_value(job.flow_options.clone())
                         .context("unable to serialize flow options")?,
+                ],
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_migration_flow_job_entry(&self, migration_name: &String, from_peer: &String, to_peer: &String) -> anyhow::Result<()> {
+        let source_peer_id = self
+            .get_peer_id_i32(from_peer)
+            .await
+            .context("unable to get source peer id")?;
+        let destination_peer_id = self
+            .get_peer_id_i32(to_peer)
+            .await
+            .context("unable to get destination peer id")?;
+
+        let stmt = self
+            .pg
+            .prepare_typed(
+                "INSERT INTO flows (name, source_peer, destination_peer) VALUES ($1, $2, $3)",
+                &[
+                    types::Type::TEXT,
+                    types::Type::INT4,
+                    types::Type::INT4,
+                ],
+            )
+            .await?;
+
+        let _rows = self
+            .pg
+            .execute(
+                &stmt,
+                &[
+                    migration_name,
+                    &source_peer_id,
+                    &destination_peer_id,
                 ],
             )
             .await?;
