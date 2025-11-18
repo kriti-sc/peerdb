@@ -1796,3 +1796,38 @@ func (a *FlowableActivity) ReportStatusMetric(ctx context.Context, status protos
 	)))
 	return nil
 }
+
+func (a *FlowableActivity) MigrateSchema(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+	logger.Info("------ In schema migration flowable", slog.String("flowName", cfg.FlowJobName))
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.GetSchemaConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.GetSchemaConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	c, c_err := source_conn.GetAllTables(ctx)
+	if c_err != nil {
+		logger.Error("error getting source tables", "error", c_err)
+		return c_err
+	}
+	logger.Info("------ Source Tables ------", "tables", c)
+
+	b, b_err := target_conn.GetAllTables(ctx)
+	if b_err != nil {
+		logger.Error("error getting target tables", "error", b_err)
+		return b_err
+	}
+	logger.Info("------ Target Tables ------", "tables", b)
+	return nil
+}

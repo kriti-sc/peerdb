@@ -101,7 +101,6 @@ func (h *FlowRequestHandler) createCdcJobEntry(ctx context.Context,
 func (h *FlowRequestHandler) createQRepJobEntry(ctx context.Context,
 	req *protos.CreateQRepFlowRequest, workflowID string,
 ) error {
-	fmt.Println("------- Creating QRep Job Entry")
 	sourcePeerName := req.QrepConfig.SourceName
 	sourcePeerID, srcErr := h.getPeerID(ctx, sourcePeerName)
 	if srcErr != nil {
