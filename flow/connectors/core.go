@@ -81,6 +81,21 @@ type GetSchemaConnector interface {
 	GetTablesInSchema(ctx context.Context, schema string, cdcEnabled bool) (*protos.SchemaTablesResponse, error)
 }
 
+type MigrationConnector interface {
+	Connector
+
+	GetIndexesInSchema(ctx context.Context, schema string) (map[string]string, error)
+	GetViewsInSchema(ctx context.Context, schema string) (map[string]string, error)
+	GetFunctionsInSchema(ctx context.Context, schema string) (map[string]string, error)
+	GetTriggersInSchema(ctx context.Context, schema string) (map[string]string, error)
+
+	CreateTableInSchema(ctx context.Context, schema string, table string, columns []*protos.ColumnsItem) error
+	CreateIndexInSchema(ctx context.Context, schema string, index_ddl string) error
+	CreateViewInSchema(ctx context.Context, schema string, view_ddl string) error
+	CreateFunctionInSchema(ctx context.Context, schema string, function_ddl string) error
+	CreateTriggerInSchema(ctx context.Context, schema string, trigger_ddl string) error
+}
+
 type CDCPullConnectorCore interface {
 	GetTableSchemaConnector
 
@@ -605,6 +620,8 @@ var (
 	_ GetTableSchemaConnector = &connmysql.MySqlConnector{}
 	_ GetTableSchemaConnector = &connsnowflake.SnowflakeConnector{}
 	_ GetTableSchemaConnector = &connclickhouse.ClickHouseConnector{}
+
+	_ MigrationConnector = &connpostgres.PostgresConnector{}
 
 	_ GetSchemaConnector = &connpostgres.PostgresConnector{}
 	_ GetSchemaConnector = &connmysql.MySqlConnector{}
