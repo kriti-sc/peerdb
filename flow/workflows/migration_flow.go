@@ -22,9 +22,37 @@ func MigrateSchemaWorkflow(ctx workflow.Context, input *protos.MigrationConfig) 
 	})
 
 	if err := workflow.ExecuteActivity(
-		migrateSchemaCtx, flowable.MigrateSchema, input,
+		migrateSchemaCtx, flowable.MigrateSchemaTables, input,
 	).Get(ctx, nil); err != nil {
-		workflow.GetLogger(ctx).Error("----- failed to migrate schema", slog.Any("error", err))
+		workflow.GetLogger(ctx).Error("----- failed to migrate schema tables", slog.Any("error", err))
+		return err
+	}
+
+	if err := workflow.ExecuteActivity(
+		migrateSchemaCtx, flowable.MigrateSchemaViews, input,
+	).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Error("----- failed to migrate schema views", slog.Any("error", err))
+		return err
+	}
+
+	if err := workflow.ExecuteActivity(
+		migrateSchemaCtx, flowable.MigrateSchemaIndexes, input,
+	).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Error("----- failed to migrate schema indexes", slog.Any("error", err))
+		return err
+	}
+
+	if err := workflow.ExecuteActivity(
+		migrateSchemaCtx, flowable.MigrateSchemaFunctions, input,
+	).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Error("----- failed to migrate schema functions", slog.Any("error", err))
+		return err
+	}
+
+	if err := workflow.ExecuteActivity(
+		migrateSchemaCtx, flowable.MigrateSchemaTriggers, input,
+	).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Error("----- failed to migrate schema triggers", slog.Any("error", err))
 		return err
 	}
 

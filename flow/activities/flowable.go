@@ -1797,13 +1797,13 @@ func (a *FlowableActivity) ReportStatusMetric(ctx context.Context, status protos
 	return nil
 }
 
-func (a *FlowableActivity) MigrateSchema(ctx context.Context, cfg *protos.MigrationConfig) error {
+func (a *FlowableActivity) MigrateSchemaTables(ctx context.Context, cfg *protos.MigrationConfig) error {
 	logger := internal.LoggerFromCtx(ctx)
 	logger.Info("------ In schema migration flowable", slog.String("flowName", cfg.FlowJobName))
 
 	env := map[string]string{}
 	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.GetSchemaConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
-	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.GetSchemaConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
 	defer source_close(ctx)
 	defer target_close(ctx)
 
@@ -1816,18 +1816,205 @@ func (a *FlowableActivity) MigrateSchema(ctx context.Context, cfg *protos.Migrat
 		return target_err
 	}
 
-	c, c_err := source_conn.GetAllTables(ctx)
+	c, c_err := source_conn.GetTablesInSchema(ctx, "public", false)
 	if c_err != nil {
 		logger.Error("error getting source tables", "error", c_err)
 		return c_err
 	}
 	logger.Info("------ Source Tables ------", "tables", c)
 
-	b, b_err := target_conn.GetAllTables(ctx)
-	if b_err != nil {
-		logger.Error("error getting target tables", "error", b_err)
-		return b_err
+	internalVersion, err := internal.PeerDBForceInternalVersion(ctx, nil)
+	if err != nil {
+		logger.Error("Failed to get internal version")
+		return fmt.Errorf("failed to get internal version: %w", err)
 	}
-	logger.Info("------ Target Tables ------", "tables", b)
+
+	for _, table := range c.Tables {
+		logger.Info("Migrating table", "table", table)
+		getColumnResponse, err := source_conn.GetColumns(ctx, internalVersion, "public", table.TableName)
+		if err != nil {
+			logger.Warn("error migrating table, unable to get columns", "table", table, "error", err)
+			continue
+		}
+		m_err := target_conn.CreateTableInSchema(ctx, "public", table.TableName, getColumnResponse.Columns)
+		if m_err != nil {
+			logger.Warn("error migrating table", "table", table, "error", m_err)
+		}
+	}
+
+	logger.Info("------ Migration completed successfully ------")
+
+	return nil
+}
+
+func (a *FlowableActivity) MigrateSchemaViews(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+	logger.Info("------ In schema migration flowable", slog.String("flowName", cfg.FlowJobName))
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	views, c_err := source_conn.GetViewsInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source views", "error", c_err)
+		return c_err
+	}
+	logger.Info("------ Source Views ------", "views", views)
+
+	migration_errors := []error{}
+	for _, view := range views {
+		logger.Info("Migrating view", "view", view)
+		m_err := target_conn.CreateViewInSchema(ctx, "public", views[view])
+		if m_err != nil {
+			logger.Warn("error migrating view", "view", view, "error", m_err)
+			migration_errors = append(migration_errors, m_err)
+		}
+	}
+
+	logger.Info("------ Migration completed successfully ------")
+	if len(migration_errors) > 0 {
+		return fmt.Errorf("errors occurred while migrating views: %v", migration_errors)
+	}
+	return nil
+}
+
+func (a *FlowableActivity) MigrateSchemaIndexes(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+	logger.Info("------ In schema migration flowable", slog.String("flowName", cfg.FlowJobName))
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	indexes, c_err := source_conn.GetIndexesInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source indexes", "error", c_err)
+		return c_err
+	}
+	logger.Info("------ Source Indexes ------", "indexes", indexes)
+
+	migration_errors := []error{}
+	for _, index := range indexes {
+		logger.Info("Migrating index", "index", index)
+		m_err := target_conn.CreateIndexInSchema(ctx, "public", indexes[index])
+		if m_err != nil {
+			logger.Warn("error migrating index", "index", index, "error", m_err)
+			migration_errors = append(migration_errors, m_err)
+		}
+	}
+
+	logger.Info("------ Migration completed successfully ------")
+	if len(migration_errors) > 0 {
+		return fmt.Errorf("errors occurred while migrating indexes: %v", migration_errors)
+	}
+	return nil
+}
+
+func (a *FlowableActivity) MigrateSchemaFunctions(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+	logger.Info("------ In schema migration flowable", slog.String("flowName", cfg.FlowJobName))
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	functions, c_err := source_conn.GetFunctionsInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source functions", "error", c_err)
+		return c_err
+	}
+	logger.Info("------ Source Functions ------", "functions", functions)
+
+	migration_errors := []error{}
+	for _, function := range functions {
+		logger.Info("Migrating function", "function", function)
+		m_err := target_conn.CreateFunctionInSchema(ctx, "public", functions[function])
+		if m_err != nil {
+			logger.Warn("error migrating function", "function", function, "error", m_err)
+			migration_errors = append(migration_errors, m_err)
+		}
+	}
+
+	logger.Info("------ Migration completed successfully ------")
+	if len(migration_errors) > 0 {
+		return fmt.Errorf("errors occurred while migrating functions: %v", migration_errors)
+	}
+	return nil
+}
+
+func (a *FlowableActivity) MigrateSchemaTriggers(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+	logger.Info("------ In schema migration flowable", slog.String("flowName", cfg.FlowJobName))
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	triggers, c_err := source_conn.GetTriggersInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source triggers", "error", c_err)
+		return c_err
+	}
+	logger.Info("------ Source Triggers ------", "triggers", triggers)
+
+	migration_errors := []error{}
+	for _, trigger := range triggers {
+		logger.Info("Migrating trigger", "trigger", trigger)
+		m_err := target_conn.CreateTriggerInSchema(ctx, "public", triggers[trigger])
+		if m_err != nil {
+			logger.Warn("error migrating trigger", "trigger", trigger, "error", m_err)
+			migration_errors = append(migration_errors, m_err)
+		}
+	}
+
+	logger.Info("------ Migration completed successfully ------")
+	if len(migration_errors) > 0 {
+		return fmt.Errorf("errors occurred while migrating triggers: %v", migration_errors)
+	}
 	return nil
 }
