@@ -2,11 +2,14 @@ package connpostgres
 
 import (
 	"context"
+	"log/slog"
+	"regexp"
+	"strings"
 
 	"github.com/PeerDB-io/peerdb/flow/generated/protos"
 )
 
-func (c *PostgresConnector) CreateTableInSchema(ctx context.Context, schema string, table string, columns []*protos.ColumnsItem) error {
+func (c *PostgresConnector) CreateTableInSchemaDDL(ctx context.Context, schema string, table string, columns []*protos.ColumnsItem) (string, error) {
 	createTableQuery := "CREATE TABLE " + schema + "." + table + " ("
 	for i, column := range columns {
 		createTableQuery += column.Name + " " + column.Type
@@ -19,54 +22,7 @@ func (c *PostgresConnector) CreateTableInSchema(ctx context.Context, schema stri
 	}
 	createTableQuery += ");"
 
-	c.logger.Info("------- ", createTableQuery)
-
-	// _, err := c.conn.Exec(ctx, createTableQuery)
-	// if err != nil {
-	// 	c.logger.Error("error creating table from schema", slog.Any("error", err))
-	// 	return err
-	// }
-	return nil
-}
-
-func (c *PostgresConnector) CreateIndexInSchema(ctx context.Context, schema string, index_ddl string) error {
-	c.logger.Info("------- ", index_ddl)
-	// _, err := c.conn.Exec(ctx, index_ddl)
-	// if err != nil {
-	// 	c.logger.Error("error creating index from schema", slog.Any("error", err))
-	// 	return err
-	// }
-	return nil
-}
-
-func (c *PostgresConnector) CreateViewInSchema(ctx context.Context, schema string, view_ddl string) error {
-	c.logger.Info("------- ", view_ddl)
-	// _, err := c.conn.Exec(ctx, view_ddl)
-	// if err != nil {
-	// 	c.logger.Error("error creating view from schema", slog.Any("error", err))
-	// 	return err
-	// }
-	return nil
-}
-
-func (c *PostgresConnector) CreateFunctionInSchema(ctx context.Context, schema string, function_ddl string) error {
-	c.logger.Info("------- ", function_ddl)
-	// _, err := c.conn.Exec(ctx, function_ddl)
-	// if err != nil {
-	// 	c.logger.Error("error creating function from schema", slog.Any("error", err))
-	// 	return err
-	// }
-	return nil
-}
-
-func (c *PostgresConnector) CreateTriggerInSchema(ctx context.Context, schema string, trigger_ddl string) error {
-	c.logger.Info("------- ", trigger_ddl)
-	// _, err := c.conn.Exec(ctx, trigger_ddl)
-	// if err != nil {
-	// 	c.logger.Error("error creating trigger from schema", slog.Any("error", err))
-	// 	return err
-	// }
-	return nil
+	return createTableQuery, nil
 }
 
 func (c *PostgresConnector) GetIndexesInSchema(ctx context.Context, schema string) (map[string]string, error) {
@@ -83,7 +39,14 @@ func (c *PostgresConnector) GetIndexesInSchema(ctx context.Context, schema strin
 		if err := rows.Scan(&indexName, &indexDef); err != nil {
 			return nil, err
 		}
-		indexes[indexName] = indexDef
+
+		// TODO: better alternative is to create an ast and modifying that
+		if !strings.Contains(strings.ToUpper(indexDef), "IF NOT EXISTS") {
+			re := regexp.MustCompile(`(?i)^(CREATE\s+(?:UNIQUE\s+)?INDEX)\s+`)
+			result := re.ReplaceAllString(indexDef, "${1} IF NOT EXISTS ")
+			indexDef = result
+		}
+		indexes[indexName] = indexDef + ";"
 	}
 	if rows.Err() != nil {
 		return nil, rows.Err()
@@ -106,7 +69,7 @@ func (c *PostgresConnector) GetViewsInSchema(ctx context.Context, schema string)
 		if err := rows.Scan(&viewName, &viewDef); err != nil {
 			return nil, err
 		}
-		views[viewName] = viewDef
+		views[viewName] = "CREATE OR REPLACE VIEW " + viewName + " AS " + viewDef
 	}
 	if rows.Err() != nil {
 		return nil, rows.Err()
@@ -119,7 +82,7 @@ func (c *PostgresConnector) GetFunctionsInSchema(ctx context.Context, schema str
 	query := `SELECT p.proname,pg_get_functiondef(p.oid) FROM pg_proc p
 				JOIN pg_namespace n ON n.oid = p.pronamespace
 				WHERE n.nspname = $1;`
-	rows, err := c.conn.Query(ctx, query)
+	rows, err := c.conn.Query(ctx, query, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +94,7 @@ func (c *PostgresConnector) GetFunctionsInSchema(ctx context.Context, schema str
 		if err := rows.Scan(&funcName, &funcDef); err != nil {
 			return nil, err
 		}
-		functions[funcName] = funcDef
+		functions[funcName] = funcDef + ";"
 	}
 	if rows.Err() != nil {
 		return nil, rows.Err()
@@ -150,7 +113,7 @@ func (c *PostgresConnector) GetTriggersInSchema(ctx context.Context, schema stri
 				SELECT oid FROM pg_class WHERE relnamespace = 
 					(SELECT oid FROM pg_namespace WHERE nspname = $1));`
 
-	rows, err := c.conn.Query(ctx, query)
+	rows, err := c.conn.Query(ctx, query, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -162,11 +125,32 @@ func (c *PostgresConnector) GetTriggersInSchema(ctx context.Context, schema stri
 		if err := rows.Scan(&triggerName, &triggerDef); err != nil {
 			return nil, err
 		}
-		triggers[triggerName] = triggerDef
+		triggers[triggerName] = triggerDef + ";"
 	}
 	if rows.Err() != nil {
 		return nil, rows.Err()
 	}
 
 	return triggers, nil
+}
+
+func (c *PostgresConnector) ExecuteDDL(ctx context.Context, ddl string) error {
+	c.logger.Info("executing ddl", slog.String("ddl", ddl))
+	tx, err := c.conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, ddl)
+	if err != nil {
+		c.logger.Error("error executing ddl statement, rolling back", slog.Any("error", err))
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil {
+			c.logger.Error("error rolling back ddl statement", slog.Any("error", rollbackErr))
+		}
+		return err
+	}
+
+	return tx.Commit(ctx)
+
 }

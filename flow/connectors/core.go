@@ -89,11 +89,9 @@ type MigrationConnector interface {
 	GetFunctionsInSchema(ctx context.Context, schema string) (map[string]string, error)
 	GetTriggersInSchema(ctx context.Context, schema string) (map[string]string, error)
 
-	CreateTableInSchema(ctx context.Context, schema string, table string, columns []*protos.ColumnsItem) error
-	CreateIndexInSchema(ctx context.Context, schema string, index_ddl string) error
-	CreateViewInSchema(ctx context.Context, schema string, view_ddl string) error
-	CreateFunctionInSchema(ctx context.Context, schema string, function_ddl string) error
-	CreateTriggerInSchema(ctx context.Context, schema string, trigger_ddl string) error
+	CreateTableInSchemaDDL(ctx context.Context, schema string, table string, columns []*protos.ColumnsItem) (string, error)
+
+	ExecuteDDL(ctx context.Context, ddl string) error
 }
 
 type CDCPullConnectorCore interface {
