@@ -1796,3 +1796,179 @@ func (a *FlowableActivity) ReportStatusMetric(ctx context.Context, status protos
 	)))
 	return nil
 }
+
+func (a *FlowableActivity) MigrateSchemaTables(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.GetSchemaConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	c, c_err := source_conn.GetTablesInSchema(ctx, "public", false)
+	if c_err != nil {
+		logger.Error("error getting source tables", "error", c_err)
+		return c_err
+	}
+
+	internalVersion, err := internal.PeerDBForceInternalVersion(ctx, nil)
+	if err != nil {
+		logger.Error("Failed to get internal version")
+		return fmt.Errorf("failed to get internal version: %w", err)
+	}
+
+	var ddl string
+	for _, table := range c.Tables {
+		logger.Info("Migrating table", "table", table)
+		getColumnResponse, err := source_conn.GetColumns(ctx, internalVersion, "public", table.TableName)
+		if err != nil {
+			logger.Warn("error migrating table, unable to get columns", "table", table, "error", err)
+			continue
+		}
+		table_ddl, m_err := target_conn.CreateTableInSchemaDDL(ctx, "public", table.TableName, getColumnResponse.Columns)
+		if m_err != nil {
+			logger.Warn("error migrating table", "table", table, "error", m_err)
+		}
+		ddl += table_ddl
+	}
+
+	return target_conn.ExecuteDDL(ctx, ddl)
+}
+
+func (a *FlowableActivity) MigrateSchemaViews(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	views, c_err := source_conn.GetViewsInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source views", "error", c_err)
+		return c_err
+	}
+
+	var ddl string
+	for _, view := range views {
+		ddl += view
+	}
+
+	return target_conn.ExecuteDDL(ctx, ddl)
+}
+
+func (a *FlowableActivity) MigrateSchemaIndexes(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	indexes, c_err := source_conn.GetIndexesInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source indexes", "error", c_err)
+		return c_err
+	}
+
+	var ddl string
+	for _, index := range indexes {
+		ddl += index
+	}
+
+	return target_conn.ExecuteDDL(ctx, ddl)
+}
+
+func (a *FlowableActivity) MigrateSchemaFunctions(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	functions, c_err := source_conn.GetFunctionsInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source functions", "error", c_err)
+		return c_err
+	}
+
+	var ddl string
+	for _, function := range functions {
+		ddl += function
+	}
+
+	return target_conn.ExecuteDDL(ctx, ddl)
+}
+
+func (a *FlowableActivity) MigrateSchemaTriggers(ctx context.Context, cfg *protos.MigrationConfig) error {
+	logger := internal.LoggerFromCtx(ctx)
+
+	env := map[string]string{}
+	source_conn, source_close, source_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.SourcePeer)
+	target_conn, target_close, target_err := connectors.GetByNameAs[connectors.MigrationConnector](ctx, env, a.CatalogPool, cfg.TargetPeer)
+	defer source_close(ctx)
+	defer target_close(ctx)
+
+	if source_err != nil {
+		logger.Error("error getting source connector", "error", source_err)
+		return source_err
+	}
+	if target_err != nil {
+		logger.Error("error getting target connector", "error", target_err)
+		return target_err
+	}
+
+	triggers, c_err := source_conn.GetTriggersInSchema(ctx, "public")
+	if c_err != nil {
+		logger.Error("error getting source triggers", "error", c_err)
+		return c_err
+	}
+
+	var ddl string
+	for _, trigger := range triggers {
+		ddl += trigger
+	}
+
+	return target_conn.ExecuteDDL(ctx, ddl)
+}

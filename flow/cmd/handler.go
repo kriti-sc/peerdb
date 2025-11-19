@@ -133,6 +133,40 @@ func (h *FlowRequestHandler) createQRepJobEntry(ctx context.Context,
 	return nil
 }
 
+func (h *FlowRequestHandler) createMigrationJobEntry(ctx context.Context,
+	req *protos.CreateMigrationFlowRequest, workflowID string,
+) error {
+	sourcePeerName := req.MigrationConfig.SourcePeer
+	sourcePeerID, srcErr := h.getPeerID(ctx, sourcePeerName)
+	if srcErr != nil {
+		return fmt.Errorf("unable to get peer id for source peer %s: %w",
+			sourcePeerName, srcErr)
+	}
+
+	destinationPeerName := req.MigrationConfig.TargetPeer
+	destinationPeerID, dstErr := h.getPeerID(ctx, destinationPeerName)
+	if dstErr != nil {
+		return fmt.Errorf("unable to get peer id for target peer %s: %w",
+			destinationPeerName, dstErr)
+	}
+
+	cfgBytes, err := proto.Marshal(req.MigrationConfig)
+	if err != nil {
+		return fmt.Errorf("unable to marshal migration config: %w", err)
+	}
+
+	flowName := req.MigrationConfig.FlowJobName
+	if _, err := h.pool.Exec(ctx, `INSERT INTO flows(workflow_id,name,source_peer,destination_peer,config_proto,status,
+		description) VALUES ($1,$2,$3,$4,$5,$6,'gRPC')
+	`, workflowID, flowName, sourcePeerID, destinationPeerID, cfgBytes, protos.FlowStatus_STATUS_RUNNING,
+	); err != nil {
+		return fmt.Errorf("unable to insert into flows table for migration flow %s with source %s and target %s: %w",
+			flowName, sourcePeerName, destinationPeerName, err)
+	}
+
+	return nil
+}
+
 func (h *FlowRequestHandler) CreateCDCFlow(
 	ctx context.Context, req *protos.CreateCDCFlowRequest,
 ) (*protos.CreateCDCFlowResponse, APIError) {
@@ -263,6 +297,44 @@ func (h *FlowRequestHandler) CreateQRepFlow(
 	}
 
 	return &protos.CreateQRepFlowResponse{
+		WorkflowId: workflowID,
+	}, nil
+}
+
+func (h *FlowRequestHandler) CreateMigrationFlow(ctx context.Context, req *protos.CreateMigrationFlowRequest) (*protos.CreateMigrationFlowResponse, APIError) {
+	cfg := req.MigrationConfig
+	workflowID := fmt.Sprintf("%s-migrationflow", cfg.FlowJobName)
+	workflowOptions := client.StartWorkflowOptions{
+		ID:                    workflowID,
+		TaskQueue:             h.peerflowTaskQueueID,
+		TypedSearchAttributes: shared.NewSearchAttributes(cfg.FlowJobName),
+	}
+
+	if err := h.createMigrationJobEntry(ctx, req, workflowID); err != nil {
+		slog.ErrorContext(ctx, "unable to create migration job entry",
+			slog.Any("error", err), slog.String("flowName", cfg.FlowJobName))
+		return nil, NewInternalApiError(fmt.Errorf("unable to create migration job entry: %w", err))
+	}
+	source_dbtype, err := connectors.LoadPeerType(ctx, h.pool, cfg.SourcePeer)
+	if err != nil {
+		return nil, NewInternalApiError(err)
+	}
+	dest_dbtype, err := connectors.LoadPeerType(ctx, h.pool, cfg.TargetPeer)
+	if err != nil {
+		return nil, NewInternalApiError(err)
+	}
+
+	if source_dbtype != protos.DBType_POSTGRES && dest_dbtype != protos.DBType_POSTGRES {
+		return nil, NewUnimplementedApiError(errors.New("migration flow currently only supports Postgres as source or destination"))
+	}
+
+	if _, err := h.temporalClient.ExecuteWorkflow(ctx, workflowOptions, peerflow.MigrateSchemaWorkflow, cfg); err != nil {
+		slog.ErrorContext(ctx, "unable to start Migration workflow",
+			slog.Any("error", err), slog.String("flowName", cfg.FlowJobName))
+		return nil, NewInternalApiError(fmt.Errorf("unable to start Migration workflow: %w", err))
+	}
+
+	return &protos.CreateMigrationFlowResponse{
 		WorkflowId: workflowID,
 	}, nil
 }

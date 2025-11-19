@@ -150,6 +150,16 @@ pub enum PeerDDL {
         if_exists: bool,
         flow_job_name: String,
     },
+    CreateMigration {
+        if_not_exists: bool,
+        migration_name: String,
+        from_peer: String,
+        to_peer: String,
+    },
+    DropMigration {
+        if_exists: bool,
+        migration_name: String,
+    },
 }
 
 impl StatementAnalyzer for PeerDDLAnalyzer {
@@ -174,6 +184,28 @@ impl StatementAnalyzer for PeerDDLAnalyzer {
                 Ok(Some(PeerDDL::CreatePeer {
                     peer: Box::new(peer),
                     if_not_exists: *if_not_exists,
+                }))
+            }
+            Statement::CreateMigration {
+                if_not_exists,
+                migration_name,
+                from_peer,
+                to_peer,
+            } => {
+                Ok(Some(PeerDDL::CreateMigration {
+                    if_not_exists: *if_not_exists,
+                    migration_name: migration_name.to_string(),
+                    from_peer: from_peer.to_string().to_lowercase(),
+                    to_peer: to_peer.to_string().to_lowercase(),
+                }))
+            }
+            Statement::DropMigration {
+                if_exists,
+                migration_name,
+            } => {
+                Ok(Some(PeerDDL::DropMigration {
+                    if_exists: *if_exists,
+                    migration_name: migration_name.to_string(),
                 }))
             }
             Statement::CreateMirror {

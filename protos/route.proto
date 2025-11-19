@@ -20,7 +20,13 @@ message CreateQRepFlowRequest {
   peerdb_flow.QRepConfig qrep_config = 1;
 }
 
+message CreateMigrationFlowRequest {
+  peerdb_flow.MigrationConfig migration_config = 1;
+}
+
 message CreateQRepFlowResponse { string workflow_id = 1; }
+
+message CreateMigrationFlowResponse { string workflow_id = 1; }
 
 message AlertConfig {
   int32 id = 1;
@@ -531,6 +537,13 @@ service FlowService {
   rpc CreateQRepFlow(CreateQRepFlowRequest) returns (CreateQRepFlowResponse) {
     option (google.api.http) = {
       post : "/v1/flows/qrep/create",
+      body : "*"
+    };
+  }
+
+  rpc CreateMigrationFlow(CreateMigrationFlowRequest) returns (CreateMigrationFlowResponse) {
+    option (google.api.http) = {
+      post : "/v1/flows/migration/create",
       body : "*"
     };
   }

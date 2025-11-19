@@ -303,6 +303,50 @@ impl NexusBackend {
         }
     }
 
+    async fn create_migration<'a>(
+        &self,
+        create_migration_stmt: &NexusStatement,
+    ) -> PgWireResult<Vec<Response<'a>>> {
+        match create_migration_stmt {
+            NexusStatement::PeerDDL { stmt: _, ddl } => match ddl.as_ref() {
+                PeerDDL::CreateMigration {
+                    if_not_exists,
+                    migration_name,
+                    from_peer,
+                    to_peer,
+                } => {
+                    if self.flow_handler.is_none() {
+                        return Err(PgWireError::ApiError(
+                            "flow service is not configured".into(),
+                        ));
+                    }
+                    let mirror_exists = Self::check_for_mirror(self.catalog.as_ref(), &migration_name).await?;
+                    if !mirror_exists {
+                        // {
+                        //     self.catalog
+                        //         .create_migration_flow_job_entry(migration_name, from_peer, to_peer)
+                        //         .await
+                        //         .map_err(|err| {
+                        //             PgWireError::ApiError(
+                        //                 format!("unable to create migration job entry: {err:?}")
+                        //                     .into(),
+                        //             )
+                        //         })?;
+                        // }
+
+                        let _workflow_id = self.run_migration(migration_name, from_peer, to_peer).await?;
+                        let create_migration_success = format!("CREATE MIGRATION {}", migration_name);
+                        Ok(vec![Response::Execution(Tag::new(&create_migration_success))])
+                    } else {
+                        Self::handle_mirror_existence(*if_not_exists, &migration_name)
+                    }
+                }
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+    }
+
     async fn handle_query<'a>(
         &self,
         nexus_stmt: NexusStatement,
@@ -317,8 +361,15 @@ impl NexusBackend {
                             e.to_string(),
                         )))
                     })?;
-
                     Ok(vec![Response::Execution(Tag::new("OK"))])
+                }
+                PeerDDL::CreateMigration { .. } => {
+                    self.create_migration(&nexus_stmt).await
+                }
+                PeerDDL::DropMigration { .. } => {
+                    Err(PgWireError::ApiError(
+                        "DROP MIGRATION not yet implemented".into(),
+                    ))
                 }
                 PeerDDL::CreateMirrorForCDC {
                     if_not_exists,
@@ -631,6 +682,23 @@ impl NexusBackend {
                 qrep_flow_job,
                 qrep_flow_job.source_peer.clone(),
                 qrep_flow_job.target_peer.clone(),
+            )
+            .await
+            .map_err(|err| {
+                PgWireError::ApiError(format!("unable to submit job: {err:?}").into())
+            })?;
+
+        Ok(workflow_id)
+    }
+
+     async fn run_migration(&self, migration_name: &String, from_peer: &String, to_peer: &String) -> PgWireResult<String> {
+        // make a request to the flow service to start the job.
+        let mut flow_handler = self.flow_handler.as_ref().unwrap().lock().await;
+        let workflow_id = flow_handler
+            .start_migration_flow_job(
+                migration_name,
+                from_peer,
+                to_peer,
             )
             .await
             .map_err(|err| {

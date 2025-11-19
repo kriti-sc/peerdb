@@ -13,6 +13,8 @@ func RegisterFlowWorkerWorkflows(w worker.WorkflowRegistry) {
 	w.RegisterWorkflow(QRepPartitionWorkflow)
 	w.RegisterWorkflow(XminFlowWorkflow)
 
+	w.RegisterWorkflow(MigrateSchemaWorkflow)
+
 	w.RegisterWorkflow(GlobalScheduleManagerWorkflow)
 	w.RegisterWorkflow(HeartbeatFlowWorkflow)
 	w.RegisterWorkflow(RecordSlotSizeWorkflow)
